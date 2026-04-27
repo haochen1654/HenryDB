@@ -42,7 +42,9 @@
 # Build directories
 build/
 Build/
-build-*/
+bazel*
+out/
+bin/
 
 # CMake generated files
 CMakeFiles/
@@ -67,3 +69,13 @@ vcpkg_installed/
 # test output & cache
 Testing/
 .cache/
+
+# OS generated files
+.DS_Store
+
+# Bazel settings
+.bazelrc
+MODULE.bazel.lock
+
+# VSCode settings
+.vscode/
