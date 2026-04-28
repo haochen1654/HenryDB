@@ -12,6 +12,7 @@ cc_binary(
     visibility = ["//visibility:public"],
     deps = [
         "@abseil-cpp//absl/log:check",
+        "@abseil-cpp//absl/log:log",
     ],
 )
 
