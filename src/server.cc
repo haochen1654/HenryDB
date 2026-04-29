@@ -7,9 +7,87 @@
 #include <signal.h>
 #include <unistd.h>
 
+namespace {
+
+constexpr size_t k_max_msg = 4096;
 volatile sig_atomic_t stop = 0;
 
 void handle_sigint(int) { stop = 1; }
+
+// Helper functions to read/write the full buffer
+int32_t read_full(int fd, char *buf, size_t n) {
+  while (n > 0) {
+    ssize_t rv = read(fd, buf, n);
+    if (rv <= 0) {
+      return -1; // error, or unexpected EOF
+    }
+
+    if ((size_t)rv > n) {
+      LOG(ERROR) << "read returned more bytes than requested: " << rv << " > "
+                 << n;
+    }
+
+    n -= (size_t)rv;
+    buf += rv;
+  }
+  return 0;
+}
+
+int32_t write_all(int fd, const char *buf, size_t n) {
+  while (n > 0) {
+    ssize_t rv = write(fd, buf, n);
+    if (rv <= 0) {
+      return -1; // error
+    }
+
+    if ((size_t)rv > n) {
+      LOG(ERROR) << "write returned more bytes than requested: " << rv << " > "
+                 << n;
+    }
+
+    n -= (size_t)rv;
+    buf += rv;
+  }
+  return 0;
+}
+
+int32_t one_request(int conn_fd) {
+  // 4 bytes header
+  char rbuf[4 + k_max_msg];
+  errno = 0;
+  int32_t err = read_full(conn_fd, rbuf, 4);
+  if (err < 0) {
+    LOG(ERROR) << "read header failed: "
+               << (errno == 0 ? "EOF" : "read() error");
+    return err;
+  }
+
+  uint32_t len = 0;
+  memcpy(&len, rbuf, 4);
+
+  if (len > k_max_msg) {
+    LOG(ERROR) << "message too long";
+    return -1;
+  }
+  // request body
+  err = read_full(conn_fd, &rbuf[4], len);
+  if (err) {
+    LOG(ERROR) << "read() error";
+    return err;
+  }
+
+  // do something
+  LOG(INFO) << "client says: " << std::string(&rbuf[4], len);
+  // reply using the same protocol
+  const char reply[] = "world";
+  char wbuf[4 + sizeof(reply)];
+  len = (uint32_t)strlen(reply);
+  memcpy(wbuf, &len, 4);
+  memcpy(&wbuf[4], reply, len);
+  return write_all(conn_fd, wbuf, 4 + len);
+}
+
+} // namespace
 
 int main() {
   // Handle SIGINT to allow graceful shutdown
@@ -39,16 +117,19 @@ int main() {
       if (errno == EINTR && stop) {
         break;
       }
-      CHECK(false) << "accept failed";
+      continue; // Accept failed, try again
     }
-    // Read data from the client
-    char buffer[1024] = {0};
 
-    if (read(client_fd, buffer, sizeof(buffer) - 1) > 0) {
-      LOG(INFO) << "Client says: " << buffer;
-      const char *response = "Hello from server!";
-      send(client_fd, response, strlen(response), 0);
+    // only serves one client connection at once
+    while (!stop) {
+      int32_t err = one_request(client_fd);
+      // If the client closed the connection, or an error occurred, stop serving
+      // this client
+      if (err < 0 || stop) {
+        break;
+      }
     }
+
     close(client_fd);
   }
   close(server_fd);
