@@ -115,6 +115,7 @@ int main() {
     int client_fd = accept(server_fd, (sockaddr *)&address, &addr_len);
     if (client_fd == -1) {
       if (errno == EINTR && stop) {
+        LOG(INFO) << "Shutting down server...";
         break;
       }
       continue; // Accept failed, try again
@@ -126,6 +127,9 @@ int main() {
       // If the client closed the connection, or an error occurred, stop serving
       // this client
       if (err < 0 || stop) {
+        LOG(INFO) << "Interrupting client connection: "
+                  << (err < 0 ? "client closed connection or error occurred"
+                              : "server is shutting down");
         break;
       }
     }
